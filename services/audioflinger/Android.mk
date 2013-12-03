@@ -46,6 +46,14 @@ LOCAL_SHARED_LIBRARIES := \
     libdl \
     libpowermanager
 
+# SRS Processing
+ifeq ($(strip $(BOARD_USES_SRS_TRUEMEDIA)),true)
+LOCAL_SHARED_LIBRARIES += libsrsprocessing
+LOCAL_CFLAGS += -DSRS_PROCESSING
+LOCAL_C_INCLUDES += $(TARGET_OUT_HEADERS)/mm-audio/audio-effects
+endif
+# SRS Processing
+
 LOCAL_STATIC_LIBRARIES := \
     libscheduling_policy \
     libcpustats \
@@ -62,6 +70,10 @@ ifeq ($(TARGET_CPU_SMP),true)
     LOCAL_CFLAGS += -DANDROID_SMP=1
 else
     LOCAL_CFLAGS += -DANDROID_SMP=0
+endif
+
+ifeq ($(BOARD_HAVE_PRE_KITKAT_AUDIO_BLOB),true)
+    LOCAL_CFLAGS += -DHAVE_PRE_KITKAT_AUDIO_BLOB
 endif
 
 LOCAL_CFLAGS += -fvisibility=hidden
