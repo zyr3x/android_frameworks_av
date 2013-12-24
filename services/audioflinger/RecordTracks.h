@@ -28,7 +28,11 @@ public:
                                 audio_format_t format,
                                 audio_channel_mask_t channelMask,
                                 size_t frameCount,
-                                int sessionId);
+#ifdef QCOM_HARDWARE
+                                uint32_t flags,
+#endif
+                                int sessionId,
+                                int uid);
     virtual             ~RecordTrack();
 
     virtual status_t    start(AudioSystem::sync_event_t event, int triggerSession);
@@ -57,6 +61,9 @@ private:
                                    int64_t pts = kInvalidPTS);
     // releaseBuffer() not overridden
 
+#ifdef QCOM_HARDWARE
+    track_flags_t       mFlags;
+#endif
     bool                mOverflow;  // overflow on most recent attempt to fill client buffer
     AudioRecordServerProxy* mAudioRecordServerProxy;
 };
