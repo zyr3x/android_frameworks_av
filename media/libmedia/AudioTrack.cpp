@@ -2,6 +2,8 @@
 ** Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
 ** Not a Contribution.
 ** Copyright 2007, The Android Open Source Project
+** Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+** Not a Contribution.
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -23,10 +25,14 @@
 #include <sys/resource.h>
 #include <audio_utils/primitives.h>
 #include <binder/IPCThreadState.h>
+#include <media/AudioParameter.h>
+#include <media/AudioSystem.h>
 #include <media/AudioTrack.h>
 #include <utils/Log.h>
 #include <private/media/AudioTrackShared.h>
 #include <media/IAudioFlinger.h>
+#include <cutils/properties.h>
+#include <system/audio.h>
 
 #define WAIT_PERIOD_MS                  10
 #define WAIT_STREAM_END_TIMEOUT_SEC     120
@@ -318,10 +324,6 @@ status_t AudioTrack::set(
                 // FIXME why can't we allow direct AND fast?
                 ((flags | AUDIO_OUTPUT_FLAG_DIRECT) & ~AUDIO_OUTPUT_FLAG_FAST);
     }
-    // do not allow FAST flag for Voice Call stream type
-    if (streamType == AUDIO_STREAM_VOICE_CALL) {
-        flags = (audio_output_flags_t)(flags &~AUDIO_OUTPUT_FLAG_FAST);
-    }
     // only allow deep buffering for music stream type
     if (streamType != AUDIO_STREAM_MUSIC) {
         flags = (audio_output_flags_t)(flags &~AUDIO_OUTPUT_FLAG_DEEP_BUFFER);
@@ -361,7 +363,56 @@ status_t AudioTrack::set(
             mFrameSizeAF = sizeof(uint8_t);
         }
     }
-#else
+#elif defined(QCOM_HARDWARE)
+    if ((streamType == AUDIO_STREAM_VOICE_CALL) &&
+        (channelCount == 1) &&
+        (sampleRate == 8000 || sampleRate == 16000)) {
+        // Allow Voip direct output only if:
+        // audio mode is MODE_IN_COMMUNCATION; AND
+        // voip output is not opened already; AND
+        // requested sample rate matches with that of voip input stream (if opened already)
+        int value = 0;
+        uint32_t mode = 0, voipOutCount = 1, voipSampleRate = 1;
+        String8 valueStr = AudioSystem::getParameters((audio_io_handle_t)0, String8("audio_mode"));
+        AudioParameter result = AudioParameter(valueStr);
+        if (result.getInt(String8("audio_mode"), value) == NO_ERROR) {
+            mode = value;
+        }
+
+        valueStr = AudioSystem::getParameters((audio_io_handle_t)0,
+                                              String8("voip_out_stream_count"));
+        result = AudioParameter(valueStr);
+        if (result.getInt(String8("voip_out_stream_count"), value) == NO_ERROR) {
+            voipOutCount = value;
+        }
+
+        valueStr = AudioSystem::getParameters((audio_io_handle_t)0,
+                                              String8("voip_sample_rate"));
+        result = AudioParameter(valueStr);
+        if (result.getInt(String8("voip_sample_rate"), value) == NO_ERROR) {
+            voipSampleRate = value;
+        }
+
+        if ((mode == AUDIO_MODE_IN_COMMUNICATION) && (voipOutCount == 0) &&
+            ((voipSampleRate == 0) || (voipSampleRate == sampleRate))) {
+            if (audio_is_linear_pcm(format)) {
+                char propValue[PROPERTY_VALUE_MAX] = {0};
+                property_get("use.voice.path.for.pcm.voip", propValue, "0");
+                bool voipPcmSysPropEnabled = !strncmp("true", propValue, sizeof("true"));
+                if (voipPcmSysPropEnabled) {
+                    flags = (audio_output_flags_t)((flags &~AUDIO_OUTPUT_FLAG_FAST) |
+                                AUDIO_OUTPUT_FLAG_VOIP_RX | AUDIO_OUTPUT_FLAG_DIRECT);
+                    ALOGD("Set VoIP and Direct output flags for PCM format");
+                }
+            } else {
+                flags = (audio_output_flags_t)((flags &~AUDIO_OUTPUT_FLAG_FAST) |
+                            AUDIO_OUTPUT_FLAG_VOIP_RX | AUDIO_OUTPUT_FLAG_DIRECT);
+                ALOGD("Set VoIP and Direct output flags for Non-PCM formats");
+            }
+        }
+    }
+#endif
+
     if (audio_is_linear_pcm(format)) {
         mFrameSize = channelCount * audio_bytes_per_sample(format);
         mFrameSizeAF = channelCount * sizeof(int16_t);
@@ -369,7 +420,6 @@ status_t AudioTrack::set(
         mFrameSize = sizeof(uint8_t);
         mFrameSizeAF = sizeof(uint8_t);
     }
-#endif
 
     audio_io_handle_t output = AudioSystem::getOutput(
                                     streamType,
@@ -411,12 +461,13 @@ status_t AudioTrack::set(
         mAudioFlinger = audioFlinger;
         status_t status = NO_ERROR;
         mAudioDirectOutput = output;
+        mDirectClient = new DirectClient(this);
         mDirectTrack = audioFlinger->createDirectTrack( getpid(),
                                                         sampleRate,
                                                         channelMask,
                                                         mAudioDirectOutput,
                                                         &mSessionId,
-                                                        this,
+                                                        mDirectClient.get(),
                                                         streamType,
                                                         &status);
         if(status != NO_ERROR) {
@@ -499,8 +550,10 @@ uint32_t AudioTrack::latency() const
         uint32_t afLatency = 0;
         uint32_t newLatency = 0;
         AudioSystem::getLatency(mOutput, mStreamType, &afLatency);
-        if (0 != mSampleRate){
-            newLatency = afLatency + (1000*mCblk->frameCount_) / mSampleRate;
+        if(0 != mSampleRate) {
+            newLatency = (mCblk == NULL) ? afLatency : (afLatency + (1000*mCblk->frameCount_) / mSampleRate);
+        } else {
+            newLatency = afLatency;
         }
         ALOGV("latency() mLatency = %d, newLatency = %d", mLatency, newLatency);
         return newLatency;
@@ -692,6 +745,11 @@ void AudioTrack::pause()
 #ifdef QCOM_DIRECTTRACK
     }
 #endif
+
+     if (isOffloaded()) {
+         sp<AudioTrackThread> t = mAudioTrackThread;
+         if (t != 0) t->pauseSync();
+     }
 }
 
 status_t AudioTrack::setVolume(float left, float right)
@@ -781,6 +839,19 @@ uint32_t AudioTrack::getSampleRate() const
         return mAudioFlinger->sampleRate(mAudioDirectOutput);
     }
 #endif
+
+    // sample rate can be updated during playback by the offloaded decoder so we need to
+    // query the HAL and update if needed.
+// FIXME use Proxy return channel to update the rate from server and avoid polling here
+    if (isOffloaded()) {
+        if (mOutput != 0) {
+            uint32_t sampleRate = 0;
+            status_t status = AudioSystem::getSamplingRate(mOutput, mStreamType, &sampleRate);
+            if (status == NO_ERROR) {
+                mSampleRate = sampleRate;
+            }
+        }
+    }
     return mSampleRate;
 }
 
@@ -1042,6 +1113,12 @@ status_t AudioTrack::createTrack_l(
         mFlags = flags;
     }
     ALOGV("createTrack_l() output %d afLatency %d", output, afLatency);
+
+    if ((flags & AUDIO_OUTPUT_FLAG_FAST) && sampleRate != afSampleRate) {
+        ALOGW("AUDIO_OUTPUT_FLAG_FAST denied by client due to mismatching sample rate (%d vs %d)",
+              sampleRate, afSampleRate);
+        flags = (audio_output_flags_t) (flags & ~AUDIO_OUTPUT_FLAG_FAST);
+    }
 
     // The client's AudioTrack buffer is divided into n parts for purpose of wakeup by server, where
     //  n = 1   fast track with single buffering; nBuffering is ignored
@@ -1873,7 +1950,6 @@ status_t AudioTrack::restoreTrack_l(const char *from)
 
     // take the frames that will be lost by track recreation into account in saved position
     size_t position = mProxy->getPosition() + mProxy->getFramesFilled();
-    mNewPosition = position + mUpdatePeriod;
     size_t bufferPosition = mStaticProxy != NULL ? mStaticProxy->getBufferPosition() : 0;
     result = createTrack_l(mStreamType,
                            mSampleRate,
@@ -1972,7 +2048,12 @@ status_t AudioTrack::dump(int fd, const Vector<String16>& args) const
 #ifdef QCOM_DIRECTTRACK
     uint32_t afLatency = 0;
     AudioSystem::getLatency(mOutput, mStreamType, &afLatency);
-    snprintf(buffer, 255, "  state(%d), latency (%d)\n", mState, afLatency + (1000*mCblk->frameCount_) / mSampleRate);
+    if(0 != mSampleRate) {
+        snprintf(buffer, 255, "  state(%d), latency (%d)\n", mState,
+                (mCblk == NULL) ? afLatency : (afLatency + (1000*mCblk->frameCount_) / mSampleRate));
+    } else {
+        snprintf(buffer, 255, "  state(%d), latency (%d)\n", mState, afLatency);
+    }
 #else
     snprintf(buffer, 255, "  state(%d), latency (%d)\n", mState, mLatency);
 #endif
@@ -2017,13 +2098,23 @@ status_t AudioTrack::getTimeStamp(uint64_t *tstamp) {
     }
     return NO_ERROR;
 }
+
+void AudioTrack::DirectClient::notify(int msg) {
+    sp<AudioTrack> track = mAudioTrack.promote();
+    if (track == 0) {
+        ALOGE("AudioTrack dead?");
+        return;
+    }
+
+    return track->notify(msg);
+}
 #endif
 
 // =========================================================================
 
 AudioTrack::AudioTrackThread::AudioTrackThread(AudioTrack& receiver, bool bCanCallJava)
     : Thread(bCanCallJava), mReceiver(receiver), mPaused(true), mPausedInt(false), mPausedNs(0LL),
-      mIgnoreNextPausedInt(false)
+      mIgnoreNextPausedInt(false), mCmdAckPending(false)
 {
 }
 
@@ -2036,6 +2127,10 @@ bool AudioTrack::AudioTrackThread::threadLoop()
     {
         AutoMutex _l(mMyLock);
         if (mPaused) {
+            if (mCmdAckPending) {
+                mCmdAckPending = false;
+                mCmdAck.signal();
+            }
             mMyCond.wait(mMyLock);
             // caller will check for exitPending()
             return true;
@@ -2045,6 +2140,10 @@ bool AudioTrack::AudioTrackThread::threadLoop()
             mPausedInt = false;
         }
         if (mPausedInt) {
+            if (mCmdAckPending) {
+                mCmdAckPending = false;
+                mCmdAck.signal();
+            }
             if (mPausedNs > 0) {
                 (void) mMyCond.waitRelative(mMyLock, mPausedNs);
             } else {
@@ -2087,10 +2186,24 @@ void AudioTrack::AudioTrackThread::pause()
     mPaused = true;
 }
 
+void AudioTrack::AudioTrackThread::pauseSync()
+{
+    AutoMutex _l(mMyLock);
+    if (mPaused || mPausedInt)
+        return;
+
+    mPaused = true;
+    mCmdAckPending = true;
+    while (!mCmdAckPending) {
+        mCmdAck.wait(mMyLock);
+    }
+}
+
 void AudioTrack::AudioTrackThread::resume()
 {
     AutoMutex _l(mMyLock);
     mIgnoreNextPausedInt = true;
+    mCmdAckPending = false;
     if (mPaused || mPausedInt) {
         mPaused = false;
         mPausedInt = false;

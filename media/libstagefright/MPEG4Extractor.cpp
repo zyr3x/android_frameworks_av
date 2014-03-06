@@ -313,6 +313,10 @@ static const char *FourCC2MIME(uint32_t fourcc) {
     switch (fourcc) {
         case FOURCC('m', 'p', '4', 'a'):
             return MEDIA_MIMETYPE_AUDIO_AAC;
+
+        case FOURCC('e', 'n', 'c', 'a'):
+            return MEDIA_MIMETYPE_AUDIO_AAC;
+
 #ifdef QCOM_HARDWARE
         case FOURCC('.', 'm', 'p', '3'):
             return MEDIA_MIMETYPE_AUDIO_MPEG;
@@ -325,6 +329,9 @@ static const char *FourCC2MIME(uint32_t fourcc) {
             return MEDIA_MIMETYPE_AUDIO_AMR_WB;
 
         case FOURCC('m', 'p', '4', 'v'):
+            return MEDIA_MIMETYPE_VIDEO_MPEG4;
+
+        case FOURCC('e', 'n', 'c', 'v'):
             return MEDIA_MIMETYPE_VIDEO_MPEG4;
 
         case FOURCC('s', '2', '6', '3'):
@@ -2401,6 +2408,10 @@ status_t MPEG4Extractor::updateAudioTrackInfoFromESDS_MPEG4Audio(
     }
 
     mLastTrack->meta->setInt32(kKeyAACProfile, objectType);
+
+    //keep AOT type
+    mLastTrack->meta->setInt32(kKeyAACAOT, objectType);
+
     uint32_t freqIndex = br.getBits(4);
 
     int32_t sampleRate = 0;

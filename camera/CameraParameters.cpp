@@ -203,6 +203,7 @@ const char CameraParameters::CAPTURE_MODE_CONTI_BURST_ONE_SHOT[] = "contiburst-o
 const char CameraParameters::CAPTURE_MODE_HDR[] = "hdr";
 const char CameraParameters::CAPTURE_MODE_PANORAMA[] = "panorama";
 const char CameraParameters::CAPTURE_MODE_ZOE[] = "zoe";
+const char CameraParameters::CAPTURE_MODE_EIS[] = "eis";
 const char CameraParameters::KEY_CONTI_BURST_STATE[] = "contiburst-state";
 const char CameraParameters::KEY_SUPPORTED_CAPTURE_MODES[] = "capture-mode-values";
 const char CameraParameters::KEY_MIN_CONTRAST[] = "contrast-min";
@@ -269,6 +270,9 @@ const char CameraParameters::WHITE_BALANCE_DAYLIGHT[] = "daylight";
 const char CameraParameters::WHITE_BALANCE_CLOUDY_DAYLIGHT[] = "cloudy-daylight";
 const char CameraParameters::WHITE_BALANCE_TWILIGHT[] = "twilight";
 const char CameraParameters::WHITE_BALANCE_SHADE[] = "shade";
+#ifdef OPPO_CAMERA_HARDWARE
+const char CameraParameters::WHITE_BALANCE_MANUAL_CCT[] = "manual-cct";
+#endif
 
 // Values for effect settings.
 const char CameraParameters::EFFECT_NONE[] = "none";
@@ -379,6 +383,9 @@ const char CameraParameters::FOCUS_MODE_FIXED[] = "fixed";
 const char CameraParameters::FOCUS_MODE_EDOF[] = "edof";
 const char CameraParameters::FOCUS_MODE_CONTINUOUS_VIDEO[] = "continuous-video";
 const char CameraParameters::FOCUS_MODE_CONTINUOUS_PICTURE[] = "continuous-picture";
+#ifdef OPPO_CAMERA_HARDWARE
+const char CameraParameters::FOCUS_MODE_MANUAL_POSITION[] = "manual";
+#endif
 #if defined(QCOM_HARDWARE)
 #ifdef QCOM_LEGACY_CAM_PARAMS
 const char CameraParameters::FOCUS_MODE_CONTINUOUS_CAMERA[] = "continuous-camera";

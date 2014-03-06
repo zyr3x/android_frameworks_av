@@ -1,7 +1,7 @@
 /*
+** Copyright 2012, The Android Open Source Project
 ** Copyright (c) 2013, The Linux Foundation. All rights reserved.
 ** Not a Contribution.
-** Copyright 2012, The Android Open Source Project
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -1290,10 +1290,8 @@ sp<AudioFlinger::PlaybackThread::Track> AudioFlinger::PlaybackThread::createTrac
             // mono or stereo
             ( (channelMask == AUDIO_CHANNEL_OUT_MONO) ||
               (channelMask == AUDIO_CHANNEL_OUT_STEREO) ) &&
-#ifndef FAST_TRACKS_AT_NON_NATIVE_SAMPLE_RATE
             // hardware sample rate
             (sampleRate == mSampleRate) &&
-#endif
             // normal mixer has an associated fast mixer
             hasFastMixer() &&
             // there are sufficient fast track slots available
@@ -2316,7 +2314,6 @@ bool AudioFlinger::PlaybackThread::threadLoop()
                 }
                 releaseWakeLock_l();
                 mWakeLockUids.clear();
-                mActiveTracksGeneration++;
                 ALOGV("wait async completion");
                 mWaitWorkCV.wait(mLock);
                 ALOGV("async completion/wake");
@@ -3111,7 +3108,6 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::MixerThread::prepareTrac
                     VolumeProvider *vp = track;
                     fastTrack->mBufferProvider = eabp;
                     fastTrack->mVolumeProvider = vp;
-                    fastTrack->mSampleRate = track->mSampleRate;
                     fastTrack->mChannelMask = track->mChannelMask;
                     fastTrack->mGeneration++;
                     state->mTrackMask |= 1 << j;
@@ -3179,15 +3175,8 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::MixerThread::prepareTrac
                 (mMixerStatusIgnoringFastTracks == MIXER_TRACKS_READY)) {
             minFrames = desiredFrames;
         }
-        // It's not safe to call framesReady() for a static buffer track, so assume it's ready
-        size_t framesReady;
-        if (track->sharedBuffer() == 0) {
-            framesReady = track->framesReady();
-        } else if (track->isStopped()) {
-            framesReady = 0;
-        } else {
-            framesReady = 1;
-        }
+
+        size_t framesReady = track->framesReady();
         if ((framesReady >= minFrames) && track->isReady() &&
                 !track->isPaused() && !track->isTerminated())
         {
@@ -3821,7 +3810,9 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::DirectOutputThread::prep
                     tracksToRemove->add(track);
                     // indicate to client process that the track was disabled because of underrun;
                     // it will then automatically call start() when data is available
+#if defined(QCOM_HARDWARE) && !defined(QCOM_DIRECTTRACK)
                     android_atomic_or(CBLK_DISABLED, &cblk->mFlags);
+#endif
                 } else if (last) {
                     mixerStatus = MIXER_TRACKS_ENABLED;
                 }
@@ -4096,8 +4087,7 @@ AudioFlinger::OffloadThread::OffloadThread(const sp<AudioFlinger>& audioFlinger,
     :   DirectOutputThread(audioFlinger, output, id, device, OFFLOAD),
         mHwPaused(false),
         mFlushPending(false),
-        mPausedBytesRemaining(0),
-        mPreviousTrack(NULL)
+        mPausedBytesRemaining(0)
 {
     //FIXME: mStandby should be set to true by ThreadBase constructor
     mStandby = true;

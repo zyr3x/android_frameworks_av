@@ -1,5 +1,7 @@
 /*
  * Copyright (C) 2009 The Android Open Source Project
+ * Copyright (c) 2013, The Linux Foundation. All rights reserved.
+ * Not a Contribution.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +25,7 @@
 #endif
 #include "StagefrightRecorder.h"
 
+#include <binder/AppOpsManager.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
 
@@ -67,6 +70,9 @@
 #include "ARTPWriter.h"
 #include <cutils/properties.h>
 
+#define RES_720P (720*1280)
+#define DUR_30MIN (30*60*1000*1000)
+#define DUR_10MIN (10*60*1000*1000)
 namespace android {
 
 // To collect the encoder usage for the battery app
@@ -87,7 +93,8 @@ StagefrightRecorder::StagefrightRecorder()
       mVideoSource(VIDEO_SOURCE_LIST_END),
       mCaptureTimeLapse(false),
       mStarted(false),
-      mSurfaceMediaSource(NULL) {
+      mSurfaceMediaSource(NULL),
+      mRecPaused(false) {
 
     ALOGV("Constructor");
     reset();
@@ -119,7 +126,7 @@ status_t StagefrightRecorder::setAudioSource(audio_source_t as) {
         return BAD_VALUE;
     }
 #ifdef QCOM_HARDWARE
-    if (ExtendedUtils::ShellProp::isAudioDisabled()) {
+    if (ExtendedUtils::ShellProp::isAudioDisabled(true)) {
         return OK;
     }
 #endif
@@ -176,10 +183,11 @@ status_t StagefrightRecorder::setAudioEncoder(audio_encoder ae) {
     }
 
 #ifdef QCOM_HARDWARE
-    if (ExtendedUtils::ShellProp::isAudioDisabled()) {
+    if (ExtendedUtils::ShellProp::isAudioDisabled(true)) {
         return OK;
     }
 #endif
+
     if (ae == AUDIO_ENCODER_DEFAULT) {
         mAudioEncoder = AUDIO_ENCODER_AMR_NB;
     } else {
@@ -792,23 +800,32 @@ status_t StagefrightRecorder::setClientName(const String16& clientName) {
 }
 
 status_t StagefrightRecorder::prepare() {
-  ALOGV(" %s E", __func__ );
 
-  if(mVideoSource != VIDEO_SOURCE_LIST_END && mVideoEncoder != VIDEO_ENCODER_LIST_END && mVideoHeight && mVideoWidth &&             /*Video recording*/
-         (mMaxFileDurationUs <=0 ||             /*Max duration is not set*/
-         (mVideoHeight * mVideoWidth < 720 * 1280 && mMaxFileDurationUs > 30*60*1000*1000) ||
-         (mVideoHeight * mVideoWidth >= 720 * 1280 && mMaxFileDurationUs > 10*60*1000*1000))) {
-    /*Above Check can be further optimized for lower resolutions to reduce file size*/
-    ALOGV("File is huge so setting 64 bit file offsets");
-    setParam64BitFileOffset(true);
+  if (mVideoSource != VIDEO_SOURCE_LIST_END && mVideoEncoder != VIDEO_ENCODER_LIST_END &&
+        mVideoHeight && mVideoWidth &&  /*Video recording*/
+        (mMaxFileDurationUs <=0 ||      /*Max duration is not set*/
+        (mVideoHeight * mVideoWidth < RES_720P && mMaxFileDurationUs > DUR_30MIN) ||
+        (mVideoHeight * mVideoWidth >= RES_720P && mMaxFileDurationUs > DUR_10MIN))) {
+        /*Above Check can be further optimized for lower resolutions to reduce file size*/
+        ALOGV("File is huge so setting 64 bit file offsets");
+        setParam64BitFileOffset(true);
   }
-  ALOGV(" %s X", __func__ );
   return OK;
 }
 
 status_t StagefrightRecorder::start() {
     CHECK_GE(mOutputFd, 0);
 
+    if (mRecPaused == true) {
+        status_t err = setSourcePause(false);
+        if (err != OK) {
+            ALOGE("Source start after pause failed");
+            return err;
+        }
+
+        mRecPaused = false;
+        return mWriter->start();
+    }
     // Get UID here for permission checking
     mClientUid = IPCThreadState::self()->getCallingUid();
     if (mWriter != NULL) {
@@ -877,39 +894,25 @@ status_t StagefrightRecorder::start() {
 }
 
 sp<MediaSource> StagefrightRecorder::createAudioSource() {
-#ifdef QCOM_DIRECTTRACK
+    // check record appop
+    if (mAppOpsManager.noteOp(AppOpsManager::OP_RECORD_AUDIO, mClientUid,
+            mClientName) != AppOpsManager::MODE_ALLOWED) {
+        return NULL;
+    }
+
+#ifdef QCOM_HARDWARE
     bool tunneledSource = false;
     const char *tunnelMime;
-    {
-        AudioParameter param;
-        String8 key("tunneled-input-formats");
-        param.add( key, String8("get") );
-        String8 valueStr = AudioSystem::getParameters( 0, param.toString());
-        AudioParameter result(valueStr);
-        int value;
-        if ( mAudioEncoder == AUDIO_ENCODER_AMR_NB &&
-            result.getInt(String8("AMR"),value) == NO_ERROR ) {
-            tunneledSource = true;
-            tunnelMime = MEDIA_MIMETYPE_AUDIO_AMR_NB;
-        }
-#ifdef ENABLE_AV_ENHANCEMENTS
-        else if ( mAudioEncoder == AUDIO_ENCODER_QCELP &&
-            result.getInt(String8("QCELP"),value) == NO_ERROR ) {
-            tunneledSource = true;
-            tunnelMime = MEDIA_MIMETYPE_AUDIO_QCELP;
-        }
-        else if ( mAudioEncoder == AUDIO_ENCODER_EVRC &&
-            result.getInt(String8("EVRC"),value) == NO_ERROR ) {
-            tunneledSource = true;
-            tunnelMime = MEDIA_MIMETYPE_AUDIO_EVRC;
-        }
-#endif
-        else if ( mAudioEncoder == AUDIO_ENCODER_AMR_WB &&
-            result.getInt(String8("AWB"),value) == NO_ERROR ) {
+
+    char prop[PROPERTY_VALUE_MAX] = {0};
+    property_get("tunnel.audio.encode", prop, "0");
+    if (!strncmp(prop, "true", 4)) {
+        if (mAudioEncoder == AUDIO_ENCODER_AMR_WB) {
             tunneledSource = true;
             tunnelMime = MEDIA_MIMETYPE_AUDIO_AMR_WB;
         }
     }
+
     if ( tunneledSource ) {
         ALOGD("tunnel recording");
         sp<AudioSource> audioSource = NULL;
@@ -925,6 +928,7 @@ sp<MediaSource> StagefrightRecorder::createAudioSource() {
         return audioSource->initCheck( ) == OK ? audioSource : NULL;
     }
 #endif
+
     sp<AudioSource> audioSource =
         new AudioSource(
                 mAudioSource,
@@ -1130,9 +1134,8 @@ status_t StagefrightRecorder::startRawAudioRecording() {
         mWriter->setMaxFileSize(mMaxFileSizeBytes);
     }
     mWriter->setListener(mListener);
-    mWriter->start();
-
-    return OK;
+    status = mWriter->start();
+    return status;
 }
 
 status_t StagefrightRecorder::startRTPRecording() {
@@ -1672,6 +1675,9 @@ status_t StagefrightRecorder::setupVideoEncoder(
         return UNKNOWN_ERROR;
     }
 
+    mVideoSourceNode = cameraSource;
+    mVideoEncoderOMX = encoder;
+
     *source = encoder;
 
     return OK;
@@ -1812,11 +1818,24 @@ status_t StagefrightRecorder::startMPEG4Recording() {
 
 status_t StagefrightRecorder::pause() {
     ALOGV("pause");
+    status_t err = OK;
     if (mWriter == NULL) {
         return UNKNOWN_ERROR;
     }
-    mWriter->pause();
 
+    err = setSourcePause(true);
+    if (err != OK) {
+        ALOGE("StagefrightRecorder pause failed");
+        return err;
+    }
+
+    err = mWriter->pause();
+    if (err != OK) {
+        ALOGE("Writer pause failed");
+        return err;
+    }
+
+    mRecPaused = true;
     if (mStarted) {
         mStarted = false;
 
@@ -1842,6 +1861,22 @@ status_t StagefrightRecorder::stop() {
     if (mCaptureTimeLapse && mCameraSourceTimeLapse != NULL) {
         mCameraSourceTimeLapse->startQuickReadReturns();
         mCameraSourceTimeLapse = NULL;
+    }
+
+    if (mRecPaused) {
+        err = mWriter->start();
+        if (err != OK) {
+            ALOGE("Writer start in StagefrightRecorder stop failed");
+            return err;
+        }
+
+        err = setSourcePause(false);
+        if (err != OK) {
+            ALOGE("Source start after pause in StagefrightRecorder stop failed");
+            return err;
+        }
+
+        mRecPaused = false;
     }
 
     if (mWriter != NULL) {
@@ -2057,4 +2092,69 @@ status_t StagefrightRecorder::startExtendedRecording() {
     return OK;
 }
 #endif
+
+status_t StagefrightRecorder::setSourcePause(bool pause) {
+    status_t err = OK;
+    if (pause) {
+        if (mVideoEncoderOMX != NULL) {
+            err = mVideoEncoderOMX->pause();
+            if (err != OK) {
+                ALOGE("OMX VideoEncoder pause failed");
+                return err;
+            }
+        }
+        if (mAudioEncoderOMX != NULL) {
+            err = mAudioEncoderOMX->pause();
+            if (err != OK) {
+                ALOGE("OMX AudioEncoder pause failed");
+                return err;
+            }
+        }
+        if (mVideoSourceNode != NULL) {
+            err = mVideoSourceNode->pause();
+            if (err != OK) {
+                ALOGE("OMX VideoSourceNode pause failed");
+                return err;
+            }
+        }
+        if (mAudioSourceNode != NULL) {
+            err = mAudioSourceNode->pause();
+            if (err != OK) {
+                ALOGE("OMX AudioSourceNode pause failed");
+                return err;
+            }
+        }
+    } else {
+        if (mVideoSourceNode != NULL) {
+            err = mVideoSourceNode->start();
+            if (err != OK) {
+                ALOGE("OMX VideoSourceNode start failed");
+                return err;
+            }
+        }
+        if (mAudioSourceNode != NULL) {
+            err = mAudioSourceNode->start();
+            if (err != OK) {
+                ALOGE("OMX AudioSourceNode start failed");
+                return err;
+            }
+        }
+        if (mVideoEncoderOMX != NULL) {
+            err = mVideoEncoderOMX->start();
+            if (err != OK) {
+                ALOGE("OMX VideoEncoder start failed");
+                return err;
+            }
+        }
+        if (mAudioEncoderOMX != NULL) {
+            err = mAudioEncoderOMX->start();
+            if (err != OK) {
+                ALOGE("OMX AudioEncoder start failed");
+                return err;
+            }
+        }
+    }
+    return err;
+}
+
 }  // namespace android
