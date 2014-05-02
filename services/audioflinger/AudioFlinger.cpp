@@ -1118,7 +1118,7 @@ status_t AudioFlinger::setParameters(audio_io_handle_t ioHandle, const String8& 
                 ALOGV("OFFLINE detected - call InvalidateTracks()");
                 for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
                     PlaybackThread *thread = mPlaybackThreads.valueAt(i).get();
-                    thread->invalidateTracks(AUDIO_STREAM_MUSIC);
+                    thread->onFatalError();
                 }
            } else if ((value.find("OFFLINE", 0) != -1) ) {
                 ALOGV("ONLINE detected - what should I do?");
@@ -1902,7 +1902,7 @@ audio_io_handle_t AudioFlinger::openOutput(audio_module_handle_t module,
         AudioStreamOut *output = new AudioStreamOut(outHwDev, outStream, flags);
         if (flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) {
             thread = new OffloadThread(this, output, id, *pDevices);
-            ALOGV("openOutput() created offload output: ID %d thread %p", id, thread);
+            ALOGD("copl:openOutput() created offload output: ID %d thread %p", id, thread);
 #ifdef QCOM_DIRECTTRACK
         }
         if (flags & AUDIO_OUTPUT_FLAG_LPA || flags & AUDIO_OUTPUT_FLAG_TUNNEL ) {
@@ -2004,25 +2004,25 @@ status_t AudioFlinger::closeOutput_nonvirtual(audio_io_handle_t output)
 {
     // keep strong reference on the playback thread so that
     // it is not destroyed while exit() is executed
-#ifdef QCOM_DIRECTTRACK
-    AudioSessionDescriptor *desc = mDirectAudioTracks.valueFor(output);
-    if (desc) {
-        ALOGV("Closing DirectTrack output %d", output);
-        desc->mActive = false;
-        desc->stream->common.standby(&desc->stream->common);
-        desc->hwDev->close_output_stream(desc->hwDev, desc->stream);
-        desc->trackRefPtr = NULL;
-        desc->stream = NULL;
-        mDirectAudioTracks.removeItem(output);
-        audioConfigChanged_l(AudioSystem::OUTPUT_CLOSED, output, NULL);
-        delete desc;
-        return NO_ERROR;
-    }
-#endif
-
     sp<PlaybackThread> thread;
     {
         Mutex::Autolock _l(mLock);
+#ifdef QCOM_DIRECTTRACK
+        AudioSessionDescriptor *desc = mDirectAudioTracks.valueFor(output);
+        if (desc) {
+            ALOGV("Closing DirectTrack output %d", output);
+            desc->mActive = false;
+            desc->stream->common.standby(&desc->stream->common);
+            desc->hwDev->close_output_stream(desc->hwDev, desc->stream);
+            desc->trackRefPtr = NULL;
+            desc->stream = NULL;
+            mDirectAudioTracks.removeItem(output);
+            audioConfigChanged_l(AudioSystem::OUTPUT_CLOSED, output, NULL);
+            delete desc;
+            return NO_ERROR;
+        }
+#endif
+
         thread = checkPlaybackThread_l(output);
         if (thread == NULL) {
             return BAD_VALUE;

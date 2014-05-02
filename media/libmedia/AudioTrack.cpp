@@ -95,14 +95,13 @@ AudioTrack::AudioTrack()
     : mStatus(NO_INIT),
       mIsTimed(false),
       mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-#ifdef QCOM_DIRECTTRACK
       mPreviousSchedulingGroup(SP_DEFAULT),
+#ifdef QCOM_DIRECTTRACK
       mAudioFlinger(NULL),
       mObserver(NULL),
-      mCblk(NULL)
-#else
-      mPreviousSchedulingGroup(SP_DEFAULT)
+      mCblk(NULL),
 #endif
+      mPausedPosition(0)
 {
 }
 
@@ -123,14 +122,13 @@ AudioTrack::AudioTrack(
     : mStatus(NO_INIT),
       mIsTimed(false),
       mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-#ifdef QCOM_DIRECTTRACK
       mPreviousSchedulingGroup(SP_DEFAULT),
+#ifdef QCOM_DIRECTTRACK
       mAudioFlinger(NULL),
       mObserver(NULL),
-      mCblk(NULL)
-#else
-      mPreviousSchedulingGroup(SP_DEFAULT)
+      mCblk(NULL),
 #endif
+      mPausedPosition(0)
 {
     mStatus = set(streamType, sampleRate, format, channelMask,
             frameCount, flags, cbf, user, notificationFrames,
@@ -155,15 +153,14 @@ AudioTrack::AudioTrack(
     : mStatus(NO_INIT),
       mIsTimed(false),
       mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-#ifdef QCOM_DIRECTTRACK
       mPreviousSchedulingGroup(SP_DEFAULT),
+#ifdef QCOM_DIRECTTRACK
       mProxy(NULL),
       mAudioFlinger(NULL),
       mObserver(NULL),
-      mCblk(NULL)
-#else
-      mPreviousSchedulingGroup(SP_DEFAULT)
+      mCblk(NULL),
 #endif
+      mPausedPosition(0)
 {
     mStatus = set(streamType, sampleRate, format, channelMask,
             0 /*frameCount*/, flags, cbf, user, notificationFrames,
@@ -607,13 +604,13 @@ status_t AudioTrack::start()
         androidSetThreadPriority(0, ANDROID_PRIORITY_AUDIO);
     }
 
-    if (!(flags & CBLK_INVALID)) {
+    if (!(flags & (CBLK_INVALID | CBLK_STREAM_FATAL_ERROR))) {
         status = mAudioTrack->start();
         if (status == DEAD_OBJECT) {
             flags |= CBLK_INVALID;
         }
     }
-    if (flags & CBLK_INVALID) {
+    if (flags & (CBLK_INVALID | CBLK_STREAM_FATAL_ERROR)) {
         status = restoreTrack_l("start");
     }
 
@@ -642,6 +639,7 @@ void AudioTrack::stop()
     }
 
     if (isOffloaded()) {
+        ALOGD("copl:AudioTrack::stop called");
         mState = STATE_STOPPING;
     } else {
         mState = STATE_STOPPED;
@@ -718,6 +716,7 @@ void AudioTrack::flush_l()
 
     mState = STATE_FLUSHED;
     if (isOffloaded()) {
+        ALOGD("copl:AudioTrack::flush_l called");
         mProxy->interrupt();
     }
     mProxy->flush();
@@ -727,6 +726,7 @@ void AudioTrack::flush_l()
 void AudioTrack::pause()
 {
     AutoMutex lock(mLock);
+    ALOGD_IF(isOffloaded(),"copl:AudioTrack::Pause called");
     if (mState == STATE_ACTIVE) {
         mState = STATE_PAUSED;
     } else if (mState == STATE_STOPPING) {
@@ -746,10 +746,13 @@ void AudioTrack::pause()
     }
 #endif
 
-     if (isOffloaded()) {
-         sp<AudioTrackThread> t = mAudioTrackThread;
-         if (t != 0) t->pauseSync();
-     }
+    if (isOffloaded()) {
+        if (mOutput != 0) {
+            uint32_t halFrames;
+            AudioSystem::getRenderPosition(mOutput, &halFrames, &mPausedPosition);
+            ALOGV("AudioTrack::pause for offload, cache current position");
+        }
+    }
 }
 
 status_t AudioTrack::setVolume(float left, float right)
@@ -982,6 +985,12 @@ status_t AudioTrack::getPosition(uint32_t *position) const
     AutoMutex lock(mLock);
     if (isOffloaded()) {
         uint32_t dspFrames = 0;
+
+        if ((mState == STATE_PAUSED) || (mState == STATE_PAUSED_STOPPING)) {
+            ALOGV("getPosition called in paused state, return cached position %u", mPausedPosition);
+            *position = mPausedPosition;
+            return NO_ERROR;
+        }
 
         if (mOutput != 0) {
             uint32_t halFrames;
@@ -1216,6 +1225,8 @@ status_t AudioTrack::createTrack_l(
     }
 
     if (flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) {
+        ALOGD("copl:sampleRate %u, channelMask %#x, format %d, session id %d",
+            sampleRate, mChannelMask, format, mSessionId);
         trackFlags |= IAudioFlinger::TRACK_OFFLOAD;
     }
 
@@ -1311,11 +1322,13 @@ status_t AudioTrack::createTrack_l(
     }
 
     mAudioTrack->attachAuxEffect(mAuxEffectId);
-    // FIXME don't believe this lie
-    if(sampleRate){
-        mLatency = afLatency + (1000*frameCount) / sampleRate;
-    }else{
+
+    if (!sampleRate || (flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD)) {
+        // Use latency given by HAL in offload mode
         mLatency = afLatency;
+    } else {
+        // FIXME don't believe this lie
+        mLatency = afLatency + (1000*frameCount) / sampleRate;
     }
     mFrameCount = frameCount;
     // If IAudioTrack is re-created, don't let the requested frameCount
@@ -1636,6 +1649,13 @@ nsecs_t AudioTrack::processAudioBuffer(const sp<AudioTrackThread>& thread)
     int32_t flags = android_atomic_and(
         ~(CBLK_UNDERRUN | CBLK_LOOP_CYCLE | CBLK_LOOP_FINAL | CBLK_BUFFER_END), &mCblk->mFlags);
 
+    if (flags & CBLK_STREAM_FATAL_ERROR) {
+        ALOGE("clbk sees STREAM_FATAL_ERROR.. close session");
+        mLock.unlock();
+        mCbf(EVENT_STREAM_END, mUserData, NULL);
+        return NS_INACTIVE;
+    }
+
     // Check for track invalidation
     if (flags & CBLK_INVALID) {
         // for offloaded tracks restoreTrack_l() will just update the sequence and clear
@@ -1711,38 +1731,6 @@ nsecs_t AudioTrack::processAudioBuffer(const sp<AudioTrackThread>& thread)
 
     mLock.unlock();
 
-    if (waitStreamEnd) {
-        AutoMutex lock(mLock);
-
-        sp<AudioTrackClientProxy> proxy = mProxy;
-        sp<IMemory> iMem = mCblkMemory;
-
-        struct timespec timeout;
-        timeout.tv_sec = WAIT_STREAM_END_TIMEOUT_SEC;
-        timeout.tv_nsec = 0;
-
-        mLock.unlock();
-        status_t status = mProxy->waitStreamEndDone(&timeout);
-        mLock.lock();
-        switch (status) {
-        case NO_ERROR:
-        case DEAD_OBJECT:
-        case TIMED_OUT:
-            mLock.unlock();
-            mCbf(EVENT_STREAM_END, mUserData, NULL);
-            mLock.lock();
-            if (mState == STATE_STOPPING) {
-                mState = STATE_STOPPED;
-                if (status != DEAD_OBJECT) {
-                   return NS_INACTIVE;
-                }
-            }
-            return 0;
-        default:
-            return 0;
-        }
-    }
-
     // perform callbacks while unlocked
     if (newUnderrun) {
         mCbf(EVENT_UNDERRUN, mUserData, NULL);
@@ -1771,6 +1759,46 @@ nsecs_t AudioTrack::processAudioBuffer(const sp<AudioTrackThread>& thread)
         // for offloaded tracks, just wait for the upper layers to recreate the track
         if (isOffloaded()) {
             return NS_INACTIVE;
+        }
+    }
+
+
+    if (waitStreamEnd) {
+        AutoMutex lock(mLock);
+
+        sp<AudioTrackClientProxy> proxy = mProxy;
+        sp<IMemory> iMem = mCblkMemory;
+
+        struct timespec timeout;
+        timeout.tv_sec = WAIT_STREAM_END_TIMEOUT_SEC;
+        timeout.tv_nsec = 0;
+
+        mLock.unlock();
+        status_t status = mProxy->waitStreamEndDone(&timeout);
+        mLock.lock();
+        switch (status) {
+        case NO_ERROR:
+        case DEAD_OBJECT:
+        case TIMED_OUT:
+            if (isOffloaded()) {
+                if (mCblk->mFlags & (CBLK_INVALID | CBLK_STREAM_FATAL_ERROR)) {
+                    // will trigger EVENT_NEW_IAUDIOTRACK/STREAM_END in next iteration
+                    return 0;
+                }
+            }
+
+            mLock.unlock();
+            mCbf(EVENT_STREAM_END, mUserData, NULL);
+            mLock.lock();
+            if (mState == STATE_STOPPING) {
+                mState = STATE_STOPPED;
+                if (status != DEAD_OBJECT) {
+                   return NS_INACTIVE;
+                }
+            }
+            return 0;
+        default:
+            return 0;
         }
     }
 
