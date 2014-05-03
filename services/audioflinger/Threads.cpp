@@ -2491,6 +2491,9 @@ bool AudioFlinger::PlaybackThread::threadLoop()
                     ssize_t ret = threadLoop_write();
                     if (ret < 0) {
                         mBytesRemaining = 0;
+                    } else if(ret > mBytesRemaining) {
+                        mBytesWritten += mBytesRemaining;
+                        mBytesRemaining = 0;
                     } else {
                         mBytesWritten += ret;
                         mBytesRemaining -= ret;
