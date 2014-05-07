@@ -113,6 +113,9 @@ private:
 #ifndef QCOM_LEGACY_MMPARSER
     static void RegisterSniffer_l(SnifferFunc func);
 #endif
+
+    static void RegisterSnifferPlugin();
+
     DataSource(const DataSource &);
     DataSource &operator=(const DataSource &);
 };
