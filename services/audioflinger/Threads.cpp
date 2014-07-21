@@ -63,6 +63,7 @@
 #include <media/nbaio/SourceAudioBufferProvider.h>
 
 #include <powermanager/PowerManager.h>
+#include <hardware/power.h>
 
 #include <common_time/cc_helper.h>
 #include <common_time/local_clock.h>
@@ -304,7 +305,8 @@ AudioFlinger::ThreadBase::ThreadBase(const sp<AudioFlinger>& audioFlinger, audio
         mStandby(false), mOutDevice(outDevice), mInDevice(inDevice),
         mAudioSource(AUDIO_SOURCE_DEFAULT), mId(id),
         // mName will be set by concrete (non-virtual) subclass
-        mDeathRecipient(new PMDeathRecipient(this))
+        mDeathRecipient(new PMDeathRecipient(this)),
+        mPowerModule(0)
 {
 }
 
@@ -512,6 +514,14 @@ void AudioFlinger::ThreadBase::dumpEffectChains(int fd, const Vector<String16>& 
     }
 }
 
+void AudioFlinger::ThreadBase::setPowerHint(bool active)
+{
+    if (mPowerModule && mPowerModule->powerHint) {
+        mPowerModule->powerHint(mPowerModule, POWER_HINT_AUDIO,
+                active ? (void *)"state=1" : (void *)"state=0");
+    }
+}
+
 void AudioFlinger::ThreadBase::acquireWakeLock(int uid)
 {
     Mutex::Autolock _l(mLock);
@@ -541,6 +551,7 @@ void AudioFlinger::ThreadBase::acquireWakeLock_l(int uid)
 {
     getPowerManager_l();
     if (mPowerManager != 0) {
+        setPowerHint(true);
         sp<IBinder> binder = new BBinder();
         status_t status;
         if (uid >= 0) {
@@ -577,6 +588,7 @@ void AudioFlinger::ThreadBase::releaseWakeLock_l()
         }
         mWakeLockToken.clear();
     }
+    setPowerHint(false);
 }
 
 void AudioFlinger::ThreadBase::updateWakeLockUids(const SortedVector<int> &uids) {
@@ -596,6 +608,10 @@ void AudioFlinger::ThreadBase::getPowerManager_l() {
             mPowerManager = interface_cast<IPowerManager>(binder);
             binder->linkToDeath(mDeathRecipient);
         }
+    }
+
+    if (mPowerModule == 0) {
+        hw_get_module(POWER_HARDWARE_MODULE_ID, (const hw_module_t **)&mPowerModule);
     }
 }
 
@@ -617,6 +633,7 @@ void AudioFlinger::ThreadBase::updateWakeLockUids_l(const SortedVector<int> &uid
 void AudioFlinger::ThreadBase::clearPowerManager()
 {
     Mutex::Autolock _l(mLock);
+    setPowerHint(false);
     releaseWakeLock_l();
     mPowerManager.clear();
 }

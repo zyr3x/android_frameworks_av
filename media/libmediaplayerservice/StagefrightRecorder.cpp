@@ -1285,19 +1285,29 @@ void StagefrightRecorder::clipVideoFrameWidth() {
 
 status_t StagefrightRecorder::checkVideoEncoderCapabilities(
         bool *supportsCameraSourceMetaDataMode) {
-    /* hardware codecs must support camera source meta data mode */
-    Vector<CodecCapabilities> codecs;
     OMXClient client;
     CHECK_EQ(client.connect(), (status_t)OK);
-    QueryCodecs(
-            client.interface(),
-            (mVideoEncoder == VIDEO_ENCODER_H263 ? MEDIA_MIMETYPE_VIDEO_H263 :
-             mVideoEncoder == VIDEO_ENCODER_MPEG_4_SP ? MEDIA_MIMETYPE_VIDEO_MPEG4 :
-             mVideoEncoder == VIDEO_ENCODER_H264 ? MEDIA_MIMETYPE_VIDEO_AVC : ""),
-            false /* decoder */, true /* hwCodec */, &codecs);
-    *supportsCameraSourceMetaDataMode = codecs.size() > 0;
-    ALOGV("encoder %s camera source meta-data mode",
-            *supportsCameraSourceMetaDataMode ? "supports" : "DOES NOT SUPPORT");
+#ifdef QCOM_HARDWARE
+    char value[PROPERTY_VALUE_MAX];
+    if (property_get("debug.camcorder.disablemeta", value, NULL) &&
+        atoi(value)) {
+        *supportsCameraSourceMetaDataMode = false;
+    }
+    else
+#endif
+    {
+        /* hardware codecs must support camera source meta data mode */
+        Vector<CodecCapabilities> codecs;
+        QueryCodecs(
+                 client.interface(),
+                (mVideoEncoder == VIDEO_ENCODER_H263 ? MEDIA_MIMETYPE_VIDEO_H263 :
+                 mVideoEncoder == VIDEO_ENCODER_MPEG_4_SP ? MEDIA_MIMETYPE_VIDEO_MPEG4 :
+                 mVideoEncoder == VIDEO_ENCODER_H264 ? MEDIA_MIMETYPE_VIDEO_AVC : ""),
+                 false /* decoder */, true /* hwCodec */, &codecs);
+        *supportsCameraSourceMetaDataMode = codecs.size() > 0;
+        ALOGV("encoder %s camera source meta-data mode", *supportsCameraSourceMetaDataMode ?
+              "supports" : "DOES NOT SUPPORT");
+    }
 
     if (!mCaptureTimeLapse) {
         // Dont clip for time lapse capture as encoder will have enough
@@ -1524,16 +1534,6 @@ status_t StagefrightRecorder::setupCameraSource(
     Size videoSize;
     videoSize.width = mVideoWidth;
     videoSize.height = mVideoHeight;
-
-    bool useMeta = encoderSupportsCameraSourceMetaDataMode;
-#ifdef QCOM_HARDWARE
-    char value[PROPERTY_VALUE_MAX];
-    if (property_get("debug.camcorder.disablemeta", value, NULL) &&
-        atoi(value)) {
-        useMeta = false;
-    }
-#endif
-
     if (mCaptureTimeLapse) {
         if (mTimeBetweenTimeLapseFrameCaptureUs < 0) {
             ALOGE("Invalid mTimeBetweenTimeLapseFrameCaptureUs value: %lld",
@@ -1545,13 +1545,13 @@ status_t StagefrightRecorder::setupCameraSource(
                 mCamera, mCameraProxy, mCameraId, mClientName, mClientUid,
                 videoSize, mFrameRate, mPreviewSurface,
                 mTimeBetweenTimeLapseFrameCaptureUs,
-                useMeta);
+                encoderSupportsCameraSourceMetaDataMode);
         *cameraSource = mCameraSourceTimeLapse;
     } else {
         *cameraSource = CameraSource::CreateFromCamera(
                 mCamera, mCameraProxy, mCameraId, mClientName, mClientUid,
                 videoSize, mFrameRate,
-                mPreviewSurface, useMeta);
+                mPreviewSurface, encoderSupportsCameraSourceMetaDataMode);
     }
     mCamera.clear();
     mCameraProxy.clear();
@@ -1653,7 +1653,12 @@ status_t StagefrightRecorder::setupVideoEncoder(
 
     uint32_t encoder_flags = 0;
     if (mIsMetaDataStoredInVideoBuffers) {
+        ALOGW("Camera source supports metadata mode, create OMXCodec for metadata");
         encoder_flags |= OMXCodec::kStoreMetaDataInVideoBuffers;
+#ifdef USE_SUBMIT_ONE_INPUT_BUFFER
+        ALOGW("msm7627 family of chipsets supports, only one buffer at a time");
+        encoder_flags |= OMXCodec::kOnlySubmitOneInputBufferAtOneTime;
+#endif
     }
 
     // Do not wait for all the input buffers to become available.
