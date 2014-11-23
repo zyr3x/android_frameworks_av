@@ -69,14 +69,10 @@ LOCAL_C_INCLUDES:= \
         $(TOP)/external/flac/include \
         $(TOP)/external/tremolo \
         $(TOP)/external/openssl/include \
-
-ifneq ($(TARGET_QCOM_MEDIA_VARIANT),)
-LOCAL_C_INCLUDES += \
-        $(TOP)/hardware/qcom/media-$(TARGET_QCOM_MEDIA_VARIANT)/mm-core/inc
-else
-LOCAL_C_INCLUDES += \
-        $(TOP)/hardware/qcom/media/mm-core/inc
-endif
+        $(TOP)/external/libvpx/libwebm \
+        $(TOP)/system/netd/include \
+        $(TOP)/external/icu/icu4c/source/common \
+        $(TOP)/external/icu/icu4c/source/i18n \
 
 LOCAL_SHARED_LIBRARIES := \
         libbinder \
