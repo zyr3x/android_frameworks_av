@@ -98,6 +98,14 @@ public:
     void getSupportedPictureSizes(Vector<Size> &sizes) const;
     void setPictureFormat(const char *format);
     const char *getPictureFormat() const;
+#ifdef QCOM_HARDWARE
+    void setTouchIndexAec(int x, int y);
+    void getTouchIndexAec(int *x, int *y) const;
+    void setTouchIndexAf(int x, int y);
+    void getTouchIndexAf(int *x, int *y) const;
+#endif
+
+    void getMeteringAreaCenter(int * x, int *y) const;
 
     void dump() const;
     status_t dump(int fd, const Vector<String16>& args) const;
@@ -118,6 +126,11 @@ public:
     // Supported preview frame sizes in pixels.
     // Example value: "800x600,480x320". Read only.
     static const char KEY_SUPPORTED_PREVIEW_SIZES[];
+#ifdef QCOM_HARDWARE
+    // Supported PREVIEW/RECORDING SIZES IN HIGH FRAME RATE recording, sizes in pixels.
+    // Example value: "800x480,432x320". Read only.
+    static const char KEY_SUPPORTED_HFR_SIZES[];
+#endif
     // The current minimum and maximum preview fps. This controls the rate of
     // preview frames received (CAMERA_MSG_PREVIEW_FRAME). The minimum and
     // maximum fps must be one of the elements from
@@ -231,6 +244,12 @@ public:
     // header.
     // Example value: "21.0" or "-5". Write only.
     static const char KEY_GPS_ALTITUDE[];
+
+#ifdef QCOM_HARDWARE
+    static const char KEY_SKIN_TONE_ENHANCEMENT[] ;
+    static const char KEY_SUPPORTED_SKIN_TONE_ENHANCEMENT_MODES[] ;
+#endif
+
     // GPS timestamp (UTC in seconds since January 1, 1970). This should be
     // stored in JPEG EXIF header.
     // Example value: "1251192757". Write only.
@@ -250,6 +269,15 @@ public:
     // Supported color effect settings.
     // Example value: "none,mono,sepia". Read only.
     static const char KEY_SUPPORTED_EFFECTS[];
+#ifdef QCOM_HARDWARE
+    //Touch Af/AEC settings.
+    static const char KEY_TOUCH_AF_AEC[];
+    static const char KEY_SUPPORTED_TOUCH_AF_AEC[];
+    //Touch Index for AEC.
+    static const char KEY_TOUCH_INDEX_AEC[];
+    //Touch Index for AF.
+    static const char KEY_TOUCH_INDEX_AF[];
+#endif
     // Current antibanding setting.
     // Example value: "auto" or ANTIBANDING_XXX constants. Read/write.
     static const char KEY_ANTIBANDING[];
@@ -262,6 +290,14 @@ public:
     // Supported scene mode settings.
     // Example value: "auto,night,fireworks". Read only.
     static const char KEY_SUPPORTED_SCENE_MODES[];
+#ifdef QCOM_HARDWARE
+    // Current auto scene detection mode.
+    // Example value: "off" or SCENE_DETECT_XXX constants. Read/write.
+    static const char KEY_SCENE_DETECT[];
+    // Supported auto scene detection settings.
+    // Example value: "off,backlight,snow/cloudy". Read only.
+    static const char KEY_SUPPORTED_SCENE_DETECT[];
+#endif
     // Current flash mode.
     // Example value: "auto" or FLASH_MODE_XXX constants. Read/write.
     static const char KEY_FLASH_MODE[];
@@ -533,6 +569,23 @@ public:
     // captured pictures.
     // Example value: "true" or "false". Read only.
     static const char KEY_VIDEO_SNAPSHOT_SUPPORTED[];
+    static const char KEY_FULL_VIDEO_SNAP_SUPPORTED[];
+
+#ifdef QCOM_HARDWARE
+    static const char KEY_ISO_MODE[];
+    static const char KEY_SUPPORTED_ISO_MODES[];
+    static const char KEY_LENSSHADE[] ;
+    static const char KEY_SUPPORTED_LENSSHADE_MODES[] ;
+
+    static const char KEY_AUTO_EXPOSURE[];
+    static const char KEY_SUPPORTED_AUTO_EXPOSURE[];
+
+    static const char KEY_GPS_LATITUDE_REF[];
+    static const char KEY_GPS_LONGITUDE_REF[];
+    static const char KEY_GPS_ALTITUDE_REF[];
+    static const char KEY_GPS_STATUS[];
+    static const char KEY_EXIF_DATETIME[];
+#endif
 
     // The state of the video stabilization. If set to true, both the
     // preview stream and the recorded video stream are stabilized by
@@ -548,6 +601,23 @@ public:
     // has no effect on still image capture.
     static const char KEY_VIDEO_STABILIZATION[];
 
+#ifdef QCOM_HARDWARE
+    static const char KEY_MEMORY_COLOR_ENHANCEMENT[];
+    static const char KEY_SUPPORTED_MEM_COLOR_ENHANCE_MODES[];
+
+    static const char KEY_POWER_MODE_SUPPORTED[];
+    static const char KEY_POWER_MODE[];
+
+    static const char KEY_ZSL[];
+    static const char KEY_SUPPORTED_ZSL_MODES[];
+
+    static const char KEY_CAMERA_MODE[];
+
+    static const char KEY_VIDEO_HIGH_FRAME_RATE[];
+    static const char KEY_SUPPORTED_VIDEO_HIGH_FRAME_RATE_MODES[];
+    static const char KEY_HIGH_DYNAMIC_RANGE_IMAGING[];
+    static const char KEY_SUPPORTED_HDR_IMAGING_MODES[];
+#endif
     // Returns true if video stabilization is supported. That is, applications
     // can set KEY_VIDEO_STABILIZATION to true and have a stabilized preview
     // stream and record stabilized videos.
@@ -557,12 +627,89 @@ public:
     // Example values: "lowlight,hdr".
     static const char KEY_LIGHTFX[];
 
+#ifdef HAVE_ISO
+    static const char KEY_SUPPORTED_ISO_MODES[];
+    static const char KEY_ISO_MODE[];
+#endif
+
+#ifdef SAMSUNG_CAMERA_HARDWARE
+    static const char KEY_ANTI_SHAKE_MODE[];
+    static const char KEY_METERING[];
+    static const char KEY_WDR[];
+    static const char KEY_WEATHER[];
+    static const char KEY_CITYID[];
+#endif
+
+#ifdef HTC_CAMERA_HARDWARE
+    static const char KEY_TIME_CONS_POST_PROCESSING[];
+    static const char KEY_OIS_MODE[];
+    static const char KEY_APP_OIS_SETTING[];
+    static const char KEY_OIS_SUPPORT[];
+    static const char KEY_CONTIBURST_TYPE[];
+    static const char KEY_CAPTURE_MODE[];
+    static const char CAPTURE_MODE_NORMAL[];
+    static const char CAPTURE_MODE_CONTI_ZOE[];
+    static const char CAPTURE_MODE_CONTI_BURST[];
+    static const char CAPTURE_MODE_CONTI_BURST_ONE_SHOT[];
+    static const char CAPTURE_MODE_HDR[];
+    static const char CAPTURE_MODE_PANORAMA[];
+    static const char CAPTURE_MODE_ZOE[];
+    static const char KEY_CONTI_BURST_STATE[];
+    static const char KEY_SUPPORTED_CAPTURE_MODES[];
+    static const char KEY_MIN_CONTRAST[];
+    static const char KEY_DEF_CONTRAST[];
+    static const char KEY_MIN_SHARPNESS[];
+    static const char KEY_DEF_SHARPNESS[];
+    static const char KEY_MIN_SATURATION[];
+    static const char KEY_DEF_SATURATION[];
+    static const char KEY_SINGLE_ISP_OUTPUT_ENABLED[];
+    static const char POST_PROCESSING_ENABLE[];
+    static const char POST_PROCESSING_BYPASS[];
+    static const char POST_PROCESSING_DELAY[];
+    static const char SCENE_MODE_OFF[];
+    static const char SCENE_MODE_TEXT[];
+    static const char BURST_MODE_LIMIT20[];
+    static const char BURST_MODE_UNLIMITED[];
+    static const char OIS_MODE_OFF[];
+    static const char OIS_MODE_ON[];
+    static const char CONTI_BURST_CAPTURING[];
+    static const char CONTI_BURST_CAPTURE_DONE[];
+    static const char APP_OIS_SETTING_FALSE[];
+    static const char APP_OIS_SETTING_TRUE[];
+    static const char KEY_GPU_EFFECT[];
+    static const char KEY_GPU_EFFECT_PARAM_0[];
+    static const char KEY_GPU_EFFECT_PARAM_1[];
+    static const char KEY_GPU_EFFECT_PARAM_2[];
+    static const char KEY_GPU_EFFECT_PARAM_3[];
+    static const char KEY_FORCE_USE_AUDIO_ENABLED[];
+#endif
+
+    static const char KEY_AE_BRACKET_HDR[];
+
     // Value for KEY_ZOOM_SUPPORTED or KEY_SMOOTH_ZOOM_SUPPORTED.
     static const char TRUE[];
     static const char FALSE[];
 
     // Value for KEY_FOCUS_DISTANCES.
     static const char FOCUS_DISTANCE_INFINITY[];
+
+#ifdef QCOM_HARDWARE
+    // DENOISE
+    static const char KEY_DENOISE[];
+    static const char KEY_SUPPORTED_DENOISE[];
+
+    //Selectable zone AF.
+    static const char KEY_SELECTABLE_ZONE_AF[];
+    static const char KEY_SUPPORTED_SELECTABLE_ZONE_AF[];
+
+    //Face Detection
+    static const char KEY_FACE_DETECTION[];
+    static const char KEY_SUPPORTED_FACE_DETECTION[];
+
+    //Redeye Reduction
+    static const char KEY_REDEYE_REDUCTION[];
+    static const char KEY_SUPPORTED_REDEYE_REDUCTION[];
+#endif
 
     // Values for white balance settings.
     static const char WHITE_BALANCE_AUTO[];
@@ -584,6 +731,24 @@ public:
     static const char EFFECT_WHITEBOARD[];
     static const char EFFECT_BLACKBOARD[];
     static const char EFFECT_AQUA[];
+#ifdef SAMSUNG_CAMERA_HARDWARE
+    static const char EFFECT_CARTOONIZE[];
+    static const char EFFECT_POINT_RED_YELLOW[];
+    static const char EFFECT_POINT_GREEN[];
+    static const char EFFECT_POINT_BLUE[];
+    static const char EFFECT_VINTAGE_COLD[];
+    static const char EFFECT_VINTAGE_WARM[];
+    static const char EFFECT_WASHED[];
+#endif
+#ifdef QCOM_HARDWARE
+    static const char EFFECT_EMBOSS[];
+    static const char EFFECT_SKETCH[];
+    static const char EFFECT_NEON[];
+
+    // Values for Touch AF/AEC
+    static const char TOUCH_AF_AEC_OFF[] ;
+    static const char TOUCH_AF_AEC_ON[] ;
+#endif
 
     // Values for antibanding settings.
     static const char ANTIBANDING_AUTO[];
@@ -608,6 +773,7 @@ public:
 
     // Values for scene mode settings.
     static const char SCENE_MODE_AUTO[];
+    static const char SCENE_MODE_ASD[];
     static const char SCENE_MODE_ACTION[];
     static const char SCENE_MODE_PORTRAIT[];
     static const char SCENE_MODE_LANDSCAPE[];
@@ -640,8 +806,15 @@ public:
 
     // Pixel color formats for KEY_PREVIEW_FORMAT, KEY_PICTURE_FORMAT,
     // and KEY_VIDEO_FRAME_FORMAT
+#ifdef QCOM_HARDWARE
+    static const char SCENE_DETECT_OFF[];
+    static const char SCENE_DETECT_ON[];
+#endif
     static const char PIXEL_FORMAT_YUV422SP[];
     static const char PIXEL_FORMAT_YUV420SP[]; // NV21
+#ifdef QCOM_HARDWARE
+    static const char PIXEL_FORMAT_YUV420SP_ADRENO[]; // ADRENO
+#endif
     static const char PIXEL_FORMAT_YUV422I[]; // YUY2
     static const char PIXEL_FORMAT_YUV420P[]; // YV12
     static const char PIXEL_FORMAT_RGB565[];
@@ -652,6 +825,12 @@ public:
     static const char PIXEL_FORMAT_BAYER_RGGB[];
     // Pixel format is not known to the framework
     static const char PIXEL_FORMAT_ANDROID_OPAQUE[];
+
+#ifdef QCOM_HARDWARE
+    static const char PIXEL_FORMAT_RAW[];
+    static const char PIXEL_FORMAT_YV12[]; // NV21
+    static const char PIXEL_FORMAT_NV12[]; //NV12
+#endif
 
     // Values for focus mode settings.
     // Auto-focus mode. Applications should call
