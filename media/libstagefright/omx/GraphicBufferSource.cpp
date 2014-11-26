@@ -170,7 +170,7 @@ void GraphicBufferSource::omxIdle() {
     if (mExecuting) {
         // We are only interested in the transition from executing->idle,
         // not loaded->idle.
-        mExecuting = false;
+        mEndOfStream = mEndOfStreamSent = true;
     }
 }
 
