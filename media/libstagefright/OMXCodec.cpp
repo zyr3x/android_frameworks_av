@@ -256,6 +256,9 @@ uint32_t OMXCodec::getComponentQuirks(
     if (info->hasQuirk("requires-allocate-on-output-ports")) {
         quirks |= kRequiresAllocateBufferOnOutputPorts;
     }
+    if (info->hasQuirk("requires-flush-before-shutdown")) {
+        quirks |= kRequiresFlushBeforeShutdown;
+    }
     if (info->hasQuirk("output-buffers-are-unreadable")) {
         quirks |= kOutputBuffersAreUnreadable;
     }
