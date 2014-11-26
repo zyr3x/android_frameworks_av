@@ -752,6 +752,9 @@ public:
     static const char SCENE_MODE_BACKLIGHT[];
     static const char SCENE_MODE_FLOWERS[];
     static const char SCENE_MODE_AR[];
+#ifdef QCOM_LEGACY_CAM_PARAMS
+    static const char SCENE_MODE_OFF[];
+#endif
 #endif
     // Applications are looking for a barcode. Camera driver will be optimized
     // for barcode reading.

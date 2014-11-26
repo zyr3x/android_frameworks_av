@@ -250,7 +250,9 @@ const char CameraParameters::SCENE_MODE_BARCODE[] = "barcode";
 const char CameraParameters::SCENE_MODE_HDR[] = "hdr";
 #ifdef QCOM_HARDWARE
 const char CameraParameters::SCENE_MODE_AR[] = "AR";
-
+#ifdef QCOM_LEGACY_CAM_PARAMS
+const char CameraParameters::SCENE_MODE_OFF[] = "off";
+#endif
 // Values for auto scene detection settings.
 const char CameraParameters::SCENE_DETECT_OFF[] = "off";
 const char CameraParameters::SCENE_DETECT_ON[] = "on";
