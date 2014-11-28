@@ -392,8 +392,8 @@ const char CameraParameters::AE_BRACKET_HDR_OFF[] = "Off";
 const char CameraParameters::AE_BRACKET_HDR[] = "HDR";
 const char CameraParameters::AE_BRACKET[] = "AE-Bracket";
 
-const char CameraParameters::LOW_POWER[] = "Low_Power";
-const char CameraParameters::NORMAL_POWER[] = "Normal_Power";
+//const char CameraParameters::LOW_POWER[] = "Low_Power";
+//const char CameraParameters::NORMAL_POWER[] = "Normal_Power";
 
 #if defined(QCOM_HARDWARE) && defined(SAMSUNG_CAMERA_LEGACY)
 const char CameraParameters::FOCUS_MODE_FACEDETECT[] = "facedetect";
