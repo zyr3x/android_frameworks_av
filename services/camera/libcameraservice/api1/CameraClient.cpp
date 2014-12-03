@@ -90,7 +90,13 @@ status_t CameraClient::initialize(camera_module_t *module) {
 
     // Enable zoom, error, focus, and metadata messages by default
     enableMsgType(CAMERA_MSG_ERROR | CAMERA_MSG_ZOOM | CAMERA_MSG_FOCUS |
+#ifndef QCOM_HARDWARE
+                  | CAMERA_MSG_PREVIEW_METADATA 
+#endif
+#ifndef OMAP_ICS_CAMERA
                   CAMERA_MSG_PREVIEW_METADATA | CAMERA_MSG_FOCUS_MOVE);
+#endif
+                 );
 
     LOG1("CameraClient::initialize X (pid %d, id %d)", callingPid, mCameraId);
     return OK;
@@ -264,9 +270,16 @@ void CameraClient::disconnect() {
 
     // Release the held ANativeWindow resources.
     if (mPreviewWindow != 0) {
+#ifdef QCOM_HARDWARE
+#ifndef NO_UPDATE_PREVIEW
+        mHardware->setPreviewWindow(0);
+#endif
+#endif
         disconnectWindow(mPreviewWindow);
         mPreviewWindow = 0;
+#ifndef QCOM_HARDWARE
         mHardware->setPreviewWindow(mPreviewWindow);
+#endif
     }
     mHardware.clear();
 
@@ -305,6 +318,15 @@ status_t CameraClient::setPreviewWindow(const sp<IBinder>& binder,
             native_window_set_buffers_transform(window.get(), mOrientation);
             result = mHardware->setPreviewWindow(window);
         }
+#ifdef QCOM_HARDWARE
+#ifndef NO_UPDATE_PREVIEW
+    } else {
+        if (window != 0) {
+            native_window_set_buffers_transform(window.get(), mOrientation);
+        }
+        result = mHardware->setPreviewWindow(window);
+#endif
+#endif
     }
 
     if (result == NO_ERROR) {
@@ -365,6 +387,9 @@ status_t CameraClient::setPreviewCallbackTarget(
 // start preview mode
 status_t CameraClient::startPreview() {
     LOG1("startPreview (pid %d)", getCallingPid());
+#ifdef QCOM_HARDWARE
+    enableMsgType(CAMERA_MSG_PREVIEW_METADATA);
+#endif
     return startCameraMode(CAMERA_PREVIEW_MODE);
 }
 
@@ -450,6 +475,9 @@ status_t CameraClient::startRecordingMode() {
 // stop preview mode
 void CameraClient::stopPreview() {
     LOG1("stopPreview (pid %d)", getCallingPid());
+#ifdef QCOM_HARDWARE
+    disableMsgType(CAMERA_MSG_PREVIEW_METADATA);
+#endif
     Mutex::Autolock lock(mLock);
     if (checkPidAndHardware() != NO_ERROR) return;
 
@@ -567,7 +595,9 @@ status_t CameraClient::takePicture(int msgType) {
                            CAMERA_MSG_RAW_IMAGE |
                            CAMERA_MSG_RAW_IMAGE_NOTIFY |
                            CAMERA_MSG_COMPRESSED_IMAGE);
-
+#ifdef QCOM_HARDWARE
+    disableMsgType(CAMERA_MSG_PREVIEW_METADATA);
+#endif
     enableMsgType(picMsgType);
     mBurstCnt = mHardware->getParameters().getInt("num-snaps-per-shutter");
     if(mBurstCnt <= 0)
