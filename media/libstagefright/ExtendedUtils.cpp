@@ -99,7 +99,7 @@ void ExtendedUtils::HFR::setHFRIfEnabled(
         hsr = atoi(hsrParam);
         if (hsr > 0) {
             ALOGI("Enabling HSR @ %d fps", hsr);
-            meta->setInt32(kKeyHSR, hsr);
+            meta->setInt32("hsr", hsr);
         } else {
             ALOGI("Invalid HSR rate specified : %d", hfr);
         }
@@ -112,14 +112,14 @@ status_t ExtendedUtils::HFR::initializeHFR(
     status_t retVal = OK;
 
     int32_t hsr = 0;
-    if (meta->findInt32(kKeyHSR, &hsr) && hsr > 0) {
+    if (meta->findInt32("hsr", &hsr) && hsr > 0) {
         ALOGI("HSR cue found. Override encode fps to %d", hsr);
         format->setInt32("frame-rate", hsr);
         return retVal;
     }
 
     int32_t hfr = 0;
-    if (!meta->findInt32(kKeyHFR, &hfr) || (hfr <= 0)) {
+    if (!meta->findInt32("hfr", &hfr) || (hfr <= 0)) {
         ALOGW("Invalid HFR rate specified");
         return retVal;
     }

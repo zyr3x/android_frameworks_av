@@ -64,7 +64,7 @@ SurfaceMediaSource::SurfaceMediaSource(uint32_t bufferWidth, uint32_t bufferHeig
     mConsumer->setConsumerUsageBits(GRALLOC_USAGE_HW_VIDEO_ENCODER
             | GRALLOC_USAGE_HW_TEXTURE
 #ifdef QCOM_BSP
-            | GRALLOC_USAGE_PRIVATE_WFD
+//            | GRALLOC_USAGE_PRIVATE_WFD
 #endif
             );
 
