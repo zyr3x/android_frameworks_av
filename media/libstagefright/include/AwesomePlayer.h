@@ -30,6 +30,14 @@
 #include <media/stagefright/MetaData.h>
 #include <utils/threads.h>
 #include <drm/DrmManagerClient.h>
+#include <media/stagefright/ExtendedStats.h>
+
+#define PLAYER_STATS(func, ...) \
+    do { \
+        if(mPlayerExtendedStats != NULL) { \
+            mPlayerExtendedStats->func(__VA_ARGS__);} \
+    } \
+    while(0)
 
 namespace android {
 
@@ -116,6 +124,8 @@ private:
     friend struct AwesomeEvent;
     friend struct PreviewPlayer;
 
+    sp<PlayerExtendedStats> mPlayerExtendedStats;
+
     enum {
         PLAYING             = 0x01,
         LOOPING             = 0x02,
@@ -196,6 +206,7 @@ private:
     uint32_t mFlags;
     uint32_t mExtractorFlags;
     uint32_t mSinceLastDropped;
+    bool mDropFramesDisable; // hevc test
 
     int64_t mTimeSourceDeltaUs;
     int64_t mVideoTimeUs;

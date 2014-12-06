@@ -792,7 +792,7 @@ status_t AudioTrack::setVolume(float left, float right)
 #endif
         mProxy->setVolumeLR(gain_minifloat_pack(gain_from_float(left), gain_from_float(right)));
 
-    if (isOffloaded_l()) {
+    if (isOffloaded_l() && mAudioTrack != NULL) {
         mAudioTrack->signal();
     }
     return NO_ERROR;
@@ -1005,6 +1005,7 @@ status_t AudioTrack::getPosition(uint32_t *position)
     AutoMutex lock(mLock);
     if (isOffloadedOrDirect_l()) {
         uint32_t dspFrames = 0;
+        status_t status;
 
         if (isOffloaded_l() && ((mState == STATE_PAUSED) || (mState == STATE_PAUSED_STOPPING))) {
             ALOGV("getPosition called in paused state, return cached position %u", mPausedPosition);
@@ -1014,7 +1015,11 @@ status_t AudioTrack::getPosition(uint32_t *position)
 
         if (mOutput != AUDIO_IO_HANDLE_NONE) {
             uint32_t halFrames;
-            AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames);
+            status = AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames);
+            if (status != NO_ERROR) {
+                ALOGW("failed to getRenderPosition for offload session");
+                return INVALID_OPERATION;
+            }
         }
         // FIXME: dspFrames may not be zero in (mState == STATE_STOPPED || mState == STATE_FLUSHED)
         // due to hardware latency. We leave this behavior for now.
@@ -1385,7 +1390,11 @@ status_t AudioTrack::createTrack_l()
         mStaticProxy = new StaticAudioTrackClientProxy(cblk, buffers, frameCount, mFrameSizeAF);
         mProxy = mStaticProxy;
     }
-    mProxy->setVolumeLR(GAIN_MINIFLOAT_PACKED_UNITY);
+
+    mProxy->setVolumeLR(gain_minifloat_pack(
+            gain_from_float(mVolume[AUDIO_INTERLEAVE_LEFT]),
+            gain_from_float(mVolume[AUDIO_INTERLEAVE_RIGHT])));
+
     mProxy->setSendLevel(mSendLevel);
     mProxy->setSampleRate(mSampleRate);
     mProxy->setMinimum(mNotificationFramesAct);
@@ -1792,36 +1801,6 @@ nsecs_t AudioTrack::processAudioBuffer()
 
     mLock.unlock();
 
-    if (waitStreamEnd) {
-        struct timespec timeout;
-        timeout.tv_sec = WAIT_STREAM_END_TIMEOUT_SEC;
-        timeout.tv_nsec = 0;
-
-        status_t status = proxy->waitStreamEndDone(&timeout);
-        switch (status) {
-        case NO_ERROR:
-        case DEAD_OBJECT:
-        case TIMED_OUT:
-            mCbf(EVENT_STREAM_END, mUserData, NULL);
-            {
-                AutoMutex lock(mLock);
-                // The previously assigned value of waitStreamEnd is no longer valid,
-                // since the mutex has been unlocked and either the callback handler
-                // or another thread could have re-started the AudioTrack during that time.
-                waitStreamEnd = mState == STATE_STOPPING;
-                if (waitStreamEnd) {
-                    mState = STATE_STOPPED;
-                    mReleased = 0;
-                }
-            }
-            if (waitStreamEnd && status != DEAD_OBJECT) {
-               return NS_INACTIVE;
-            }
-            break;
-        }
-        return 0;
-    }
-
     // perform callbacks while unlocked
     if (newUnderrun) {
         mCbf(EVENT_UNDERRUN, mUserData, NULL);
@@ -1871,7 +1850,7 @@ nsecs_t AudioTrack::processAudioBuffer()
         case NO_ERROR:
         case DEAD_OBJECT:
         case TIMED_OUT:
-            if (isOffloaded()) {
+            if (isOffloaded_l()) {
                 if (mCblk->mFlags & (CBLK_INVALID | CBLK_STREAM_FATAL_ERROR)) {
                     // will trigger EVENT_NEW_IAUDIOTRACK/STREAM_END in next iteration
                     return 0;
@@ -1960,16 +1939,6 @@ nsecs_t AudioTrack::processAudioBuffer()
             return NS_NEVER;
         }
 
-        if (mRetryOnPartialBuffer && !isOffloaded()) {
-            mRetryOnPartialBuffer = false;
-            if (avail < mRemainingFrames) {
-                int64_t myns = ((mRemainingFrames - avail) * 1100000000LL) / sampleRate;
-                if (ns < 0 || myns < ns) {
-                    ns = myns;
-                }
-                return ns;
-            }
-        }
 
         // Divide buffer size by 2 to take into account the expansion
         // due to 8 to 16 bit conversion: the callback must fill only half
@@ -2093,6 +2062,13 @@ status_t AudioTrack::restoreTrack_l(const char *from)
 #endif
         if (mState == STATE_ACTIVE) {
             result = mAudioTrack->start();
+        }
+
+        if (mVolume[AUDIO_INTERLEAVE_LEFT] != 1.0 || mVolume[AUDIO_INTERLEAVE_RIGHT] != 1.0) {
+            ALOGV("restore setVolume proxy left:%f right:%f",mVolume[AUDIO_INTERLEAVE_LEFT]
+                , mVolume[AUDIO_INTERLEAVE_RIGHT]);
+            mProxy->setVolumeLR(gain_minifloat_pack(gain_from_float(mVolume[AUDIO_INTERLEAVE_LEFT])
+                , gain_from_float(mVolume[AUDIO_INTERLEAVE_RIGHT])));
         }
     }
     if (result != NO_ERROR) {
@@ -2297,8 +2273,8 @@ void AudioTrack::setAttributesFromStreamType(audio_stream_type_t streamType) {
     case AUDIO_STREAM_INCALL_MUSIC:
         mAttributes.content_type = AUDIO_CONTENT_TYPE_MUSIC;
         mAttributes.usage = AUDIO_USAGE_MEDIA;
-        break;
 #endif
+        break;
     case AUDIO_STREAM_VOICE_CALL:
         mAttributes.content_type = AUDIO_CONTENT_TYPE_SPEECH;
         mAttributes.usage = AUDIO_USAGE_VOICE_COMMUNICATION;

@@ -191,6 +191,11 @@ status_t convertMetaDataToMessage(
         msg->setInt32("rotation-degrees", rotationDegrees);
     }
 
+    int32_t bitsPerSample;
+    if (meta->findInt32(kKeyBitsPerSample, &bitsPerSample)) {
+        msg->setInt32("bits-per-sample", bitsPerSample);
+    }
+
     uint32_t type;
     const void *data;
     size_t size;
@@ -276,7 +281,7 @@ status_t convertMetaDataToMessage(
         const uint8_t *ptr = (const uint8_t *)data;
 
         CHECK(size >= 7);
-        CHECK_EQ((unsigned)ptr[0], 1u);  // configurationVersion == 1
+        //CHECK_EQ((unsigned)ptr[0], 1u);  // configurationVersion == 1
         uint8_t profile = ptr[1] & 31;
         uint8_t level = ptr[12];
         ptr += 22;
@@ -563,6 +568,11 @@ void convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
         if (msg->findInt32("is-adts", &isADTS)) {
             meta->setInt32(kKeyIsADTS, isADTS);
         }
+
+        int32_t bitsPerSample;
+        if (msg->findInt32("bits-per-sample", &bitsPerSample)) {
+            meta->setInt32(kKeyBitsPerSample, bitsPerSample);
+        }
     }
 
     int32_t maxInputSize;
@@ -658,12 +668,10 @@ status_t sendMetaDataToHal(sp<MediaPlayerBase::AudioSink>& sink,
     if (meta->findInt32(kKeyBitRate, &bitRate)) {
         param.addInt(String8(AUDIO_OFFLOAD_CODEC_AVG_BIT_RATE), bitRate);
     }
-    if (meta->findInt32(kKeyEncoderDelay, &delaySamples)) {
-        param.addInt(String8(AUDIO_OFFLOAD_CODEC_DELAY_SAMPLES), delaySamples);
-    }
-    if (meta->findInt32(kKeyEncoderPadding, &paddingSamples)) {
-        param.addInt(String8(AUDIO_OFFLOAD_CODEC_PADDING_SAMPLES), paddingSamples);
-    }
+    meta->findInt32(kKeyEncoderDelay, &delaySamples);
+    param.addInt(String8(AUDIO_OFFLOAD_CODEC_DELAY_SAMPLES), delaySamples);
+    meta->findInt32(kKeyEncoderPadding, &paddingSamples);
+    param.addInt(String8(AUDIO_OFFLOAD_CODEC_PADDING_SAMPLES), paddingSamples);
 #ifdef ENABLE_AV_ENHANCEMENTS
 #ifdef FLAC_OFFLOAD_ENABLED
     int32_t minBlkSize, maxBlkSize, minFrmSize, maxFrmSize; //FLAC params
@@ -788,26 +796,24 @@ bool canOffloadStream(const sp<MetaData>& meta, bool hasVideo, const sp<MetaData
 
     info.format = AUDIO_FORMAT_INVALID;
     int32_t bitWidth = 16;
-#ifdef ENABLE_AV_ENHANCEMENTS
-#ifdef PCM_OFFLOAD_ENABLED_24
-    if(meta->findInt32(kKeySampleBits, &bitWidth) && 24 == bitWidth)
-        ALOGV("%s Bits per sample is 24", __func__);
+    if (meta->findInt32(kKeyBitsPerSample, &bitWidth))
+        ALOGV("%s Bits per sample is %d", __func__, bitWidth);
     else
-        ALOGW("%s No Sample Bit info in meta data", __func__);
-#endif
-#endif
+        ALOGW("%s No sample bit depth info in meta data", __func__);
+
     if (mapMimeToAudioFormat(info.format, mime) != OK) {
         ALOGE(" Couldn't map mime type \"%s\" to a valid AudioSystem::audio_format !", mime);
         return false;
+#ifdef ENABLE_AV_ENHANCEMENTS
     } else {
         // Override audio format for PCM offload
-        if (info.format == AUDIO_FORMAT_PCM_16_BIT) {
-            if (16 == bitWidth)
-                info.format = AUDIO_FORMAT_PCM_16_BIT_OFFLOAD;
-            else if (24 == bitWidth)
+        if (audio_is_linear_pcm(info.format)) {
+            if (bitWidth > 16)
                 info.format = AUDIO_FORMAT_PCM_24_BIT_OFFLOAD;
+            else
+                info.format = AUDIO_FORMAT_PCM_16_BIT_OFFLOAD;
         }
-        ALOGV("Mime type \"%s\" mapped to audio_format %d", mime, info.format);
+#endif
     }
 
     if (AUDIO_FORMAT_INVALID == info.format) {
@@ -815,6 +821,8 @@ bool canOffloadStream(const sp<MetaData>& meta, bool hasVideo, const sp<MetaData
         ALOGE("mime type \"%s\" not a known audio format", mime);
         return false;
     }
+
+    ALOGV("Mime type \"%s\" mapped to audio_format %d", mime, info.format);
 
     // Redefine aac format according to its profile
     // Offloading depends on audio DSP capabilities.

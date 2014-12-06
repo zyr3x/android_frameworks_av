@@ -113,7 +113,6 @@ status_t AudioPlayer::start(bool sourceAlreadyStarted) {
     MediaSource::ReadOptions options;
     if (mSeeking) {
         options.setSeekTo(mSeekTimeUs);
-        mSeeking = false;
     }
 
     do {
@@ -126,8 +125,25 @@ status_t AudioPlayer::start(bool sourceAlreadyStarted) {
         CHECK(mFirstBuffer == NULL);
         mFirstBufferResult = OK;
         mIsFirstBuffer = false;
+
+        if (mSeeking) {
+            mPositionTimeRealUs = 0;
+            mPositionTimeMediaUs = mSeekTimeUs;
+            mSeeking = false;
+        }
+
     } else {
         mIsFirstBuffer = true;
+
+        if (mSeeking) {
+            mPositionTimeRealUs = 0;
+            if (mFirstBuffer == NULL || !mFirstBuffer->meta_data()->findInt64(
+                    kKeyTime, &mPositionTimeMediaUs)) {
+                return UNKNOWN_ERROR;
+            }
+            mSeeking = false;
+        }
+
     }
 
     sp<MetaData> format = mSource->getFormat();
@@ -155,13 +171,10 @@ status_t AudioPlayer::start(bool sourceAlreadyStarted) {
         ALOGV("channel mask is zero,update from channel count %d", channelMask);
     }
 
-    audio_format_t audioFormat = AUDIO_FORMAT_PCM_16_BIT;
     int32_t bitWidth = 16;
-#ifdef ENABLE_AV_ENHANCEMENTS
-#if defined(FLAC_OFFLOAD_ENABLED) || defined(PCM_OFFLOAD_ENABLED_24)
-    format->findInt32(kKeySampleBits, &bitWidth);
-#endif
-#endif
+    format->findInt32(kKeyBitsPerSample, &bitWidth);
+
+    audio_format_t audioFormat = bitWidth > 16 ? AUDIO_FORMAT_PCM_32_BIT : AUDIO_FORMAT_PCM_16_BIT;
 
     if (useOffload()) {
         if (mapMimeToAudioFormat(audioFormat, mime) != OK) {
@@ -169,14 +182,15 @@ status_t AudioPlayer::start(bool sourceAlreadyStarted) {
                   __func__, mime);
             audioFormat = AUDIO_FORMAT_INVALID;
         } else {
-            // Override audio format for PCM offload
-            if (audioFormat == AUDIO_FORMAT_PCM_16_BIT) {
-                if (16 == bitWidth)
-                    audioFormat = AUDIO_FORMAT_PCM_16_BIT_OFFLOAD;
-                else if (24 == bitWidth)
+#ifdef ENABLE_AV_ENHANCEMENTS
+            if (audio_is_linear_pcm(audioFormat)) {
+                // Override audio format for PCM offload
+                if (bitWidth > 16)
                     audioFormat = AUDIO_FORMAT_PCM_24_BIT_OFFLOAD;
+                else
+                    audioFormat = AUDIO_FORMAT_PCM_16_BIT_OFFLOAD;
             }
-
+#endif
             ALOGV("%s Mime type \"%s\" mapped to audio_format 0x%x",
                   __func__, mime, audioFormat);
         }
@@ -826,28 +840,37 @@ int64_t AudioPlayer::getRealTimeUsLocked() const {
 int64_t AudioPlayer::getOutputPlayPositionUs_l()
 {
     uint32_t playedSamples = 0;
-    uint32_t sampleRate;
+    status_t err = NO_ERROR;
+    int64_t renderedDuration = 0;
+    uint32_t sampleRate = 0;
+
     if (mAudioSink != NULL) {
-        mAudioSink->getPosition(&playedSamples);
+        err = mAudioSink->getPosition(&playedSamples);
         sampleRate = mAudioSink->getSampleRate();
     } else if (mAudioTrack != NULL) {
-        mAudioTrack->getPosition(&playedSamples);
+        err = mAudioTrack->getPosition(&playedSamples);
         sampleRate = mAudioTrack->getSampleRate();
     }
+
     if (sampleRate != 0) {
         mSampleRate = sampleRate;
     }
-
-    int64_t playedUs;
-    if (mSampleRate != 0) {
-        playedUs = (static_cast<int64_t>(playedSamples) * 1000000 ) / mSampleRate;
+    // Send last known played postion if query to track fails
+    if ((err != NO_ERROR) && (mPositionTimeRealUs >= 0)) {
+        ALOGV("getOutputPlayPositionUs_l %lld", renderedDuration);
+        renderedDuration = mPositionTimeRealUs;
     } else {
-        playedUs = 0;
+        int64_t playedUs = 0;
+
+        if (mSampleRate != 0) {
+            playedUs = (static_cast<int64_t>(playedSamples) * 1000000 ) / mSampleRate;
+        }
+        // HAL position is relative to the first buffer we sent at mStartPosUs
+        renderedDuration = mStartPosUs + playedUs;
     }
 
-    // HAL position is relative to the first buffer we sent at mStartPosUs
-    const int64_t renderedDuration = mStartPosUs + playedUs;
-    ALOGV("getOutputPlayPositionUs_l %" PRId64, renderedDuration);
+    ALOGV("getOutputPlayPositionUs_l %lld", renderedDuration);
+
     return renderedDuration;
 }
 
@@ -876,8 +899,8 @@ int64_t AudioPlayer::getMediaTimeUs() {
     }
 
     int64_t realTimeOffset = getRealTimeUsLocked() - mPositionTimeRealUs;
-    if (realTimeOffset < 0) {
-        realTimeOffset = 0;
+    if (mPositionTimeMediaUs + realTimeOffset < 0) {
+        return 0;
     }
 
     return mPositionTimeMediaUs + realTimeOffset;

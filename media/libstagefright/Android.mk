@@ -64,6 +64,9 @@ LOCAL_SRC_FILES:=                         \
         avc_utils.cpp                     \
         ExtendedExtractor.cpp             \
         ExtendedUtils.cpp                 \
+        ExtendedStats.cpp                 \
+        APE.cpp                           \
+        FFMPEGSoftCodec.cpp               \
 
 LOCAL_C_INCLUDES:= \
         $(TOP)/frameworks/av/include/media/ \
@@ -115,6 +118,10 @@ ifeq ($(BOARD_USES_LEGACY_ALSA_AUDIO),true)
    LOCAL_SRC_FILES += LPAPlayerALSA.cpp TunnelPlayer.cpp
 endif
 endif
+endif
+
+ifeq ($(TARGET_BOARD_PLATFORM),omap4)
+LOCAL_CFLAGS := -DBOARD_CANT_REALLOCATE_OMX_BUFFERS
 endif
 
 #QTI FLAC Decoder
@@ -174,6 +181,16 @@ LOCAL_SHARED_LIBRARIES += \
         libdl
 
 LOCAL_CFLAGS += -Wno-multichar
+
+ifeq ($(BOARD_USE_SAMSUNG_COLORFORMAT), true)
+LOCAL_CFLAGS += -DUSE_SAMSUNG_COLORFORMAT
+
+# Include native color format header path
+LOCAL_C_INCLUDES += \
+	$(TOP)/hardware/samsung/exynos4/hal/include \
+	$(TOP)/hardware/samsung/exynos4/include
+
+endif
 
 LOCAL_MODULE:= libstagefright
 

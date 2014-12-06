@@ -23,8 +23,11 @@
 #include <media/IOMX.h>
 #include <media/stagefright/foundation/AHierarchicalStateMachine.h>
 #include <media/stagefright/CodecBase.h>
+#include <media/stagefright/ExtendedStats.h>
 #include <media/stagefright/SkipCutBuffer.h>
 #include <OMX_Audio.h>
+
+#include <system/audio.h>
 
 #define TRACK_BUFFER_TIMING     0
 
@@ -173,6 +176,7 @@ private:
     sp<IdleToLoadedState> mIdleToLoadedState;
     sp<FlushingState> mFlushingState;
     sp<SkipCutBuffer> mSkipCutBuffer;
+    sp<MediaExtendedStats> mMediaExtendedStats;
 
     AString mComponentName;
     uint32_t mFlags;
@@ -234,6 +238,9 @@ private:
     status_t submitOutputMetaDataBuffer();
     void signalSubmitOutputMetaDataBufferIfEOS_workaround();
     status_t allocateOutputBuffersFromNativeWindow();
+#ifdef USE_SAMSUNG_COLORFORMAT
+    void setNativeWindowColorFormat(OMX_COLOR_FORMATTYPE &eNativeColorFormat);
+#endif
     status_t cancelBufferToNativeWindow(BufferInfo *info);
     status_t freeOutputBuffersNotOwnedByComponent();
     BufferInfo *dequeueBufferFromNativeWindow();
@@ -293,7 +300,8 @@ private:
             bool encoder, int32_t numChannels, int32_t sampleRate, int32_t compressionLevel);
 
     status_t setupRawAudioFormat(
-            OMX_U32 portIndex, int32_t sampleRate, int32_t numChannels);
+            OMX_U32 portIndex, int32_t sampleRate, int32_t numChannels,
+            int32_t bitsPerSample = 16);
 
     status_t setMinBufferSize(OMX_U32 portIndex, size_t size);
 
